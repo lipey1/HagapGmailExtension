@@ -1,0 +1,138 @@
+:root {
+  --hagap-primary: #5271ff;
+  --hagap-accent: #f08716;
+  --hagap-dark: #24303f;
+  --hagap-muted: #969aa1;
+  --hagap-border: #aeb7c0;
+  --bg: #f7f8fc;
+  --card: #ffffff;
+  --text: #24303f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 320px;
+  padding: 16px;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(82, 113, 255, 0.16), transparent 55%),
+    radial-gradient(90% 70% at 100% 0%, rgba(240, 135, 22, 0.12), transparent 50%),
+    var(--bg);
+}
+
+.header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: contain;
+  background: #24303f;
+  box-shadow: 0 6px 14px rgba(82, 113, 255, 0.28);
+  flex-shrink: 0;
+  display: block;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--hagap-muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hagap-dark);
+}
+
+.field small {
+  color: var(--hagap-muted);
+  font-size: 11px;
+}
+
+.field input,
+.field select {
+  border: 1px solid var(--hagap-border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 2px solid rgba(82, 113, 255, 0.35);
+  border-color: var(--hagap-primary);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  width: 100%;
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  color: #fff;
+  background: var(--hagap-primary);
+  cursor: pointer;
+}
+
+.btn:hover {
+  filter: brightness(1.05);
+}
+
+.status {
+  min-height: 18px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--hagap-primary);
+  text-align: center;
+}
+
+.link {
+  display: block;
+  margin-top: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--hagap-primary);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Configurações - Hagap BMDs</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <img class="mark" src="../icons/logo.png" alt="Hagap" width="52" height="52" />
+        <div>
+          <p class="eyebrow">Hagap Systems</p>
+          <h1>BMDs no Gmail</h1>
+          <p class="lead">
+            Configure o destinatário dos e-mails enviados com anexos e o filtro de tempo padrão.
+          </p>
+        </div>
+      </header>
+
+      <section class="card">
+        <h2>Destinatário</h2>
+        <p class="hint">
+          A aba BMDs lista mensagens que <strong>você enviou para</strong> este endereço e que
+          possuem anexos (<code>from:me to:… has:attachment</code>).
+        </p>
+        <label class="field">
+          <span>E-mail do destinatário</span>
+          <input id="destinatario" type="email" placeholder="destinatario@empresa.com" />
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Filtro de tempo</h2>
+        <label class="field">
+          <span>Modo</span>
+          <select id="filterMode">
+            <option value="days">Por dias</option>
+            <option value="period">Por período</option>
+          </select>
+        </label>
+
+        <div id="daysBlock">
+          <label class="field">
+            <span>Por dias</span>
+            <select id="daysValue">
+              <option value="7">Últimos 7 dias</option>
+              <option value="30">Últimos 30 dias</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="periodBlock" hidden>
+          <label class="field">
+            <span>Por período</span>
+            <select id="periodValue">
+              <option value="week">Semanal (esta semana)</option>
+              <option value="month">Mensal (este mês)</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="card muted">
+        <h2>Como funciona</h2>
+        <ul>
+          <li>No Gmail, a aba <strong>BMDs</strong> aparece ao lado de Principais / Promoções.</li>
+          <li>Ao selecioná-la, a extensão aplica a busca nativa do Gmail.</li>
+          <li>
+            <strong>Por dias:</strong> <code>newer_than:7d</code> ou <code>newer_than:30d</code>.
+          </li>
+          <li>
+            <strong>Por período:</strong> <code>after:AAAA/MM/DD</code> (início da semana ou do mês).
+          </li>
+        </ul>
+      </section>
+
+      <div class="actions">
+        <button type="button" id="save" class="btn">Salvar configurações</button>
+        <p id="status" class="status" role="status"></p>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

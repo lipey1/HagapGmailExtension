@@ -1,0 +1,52 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+credentials.json
+**/credentials*
+**/secrets*
+**/tokens*
+*.token
+
+# Chrome extension packaging / local profiles
+*.crx
+*.zip
+!icons/**
+.chrome-profile/
+chrome-profile/
+User Data/
+Default/
+
+# Dependencies and build
+node_modules/
+dist/
+build/
+out/
+*.map
+
+# Agent / local temp
+.claude/
+.codegraph/
+.tmp/
+tmp/
+temp/
+*.log
+
+# Sample dumps / downloaded BMDs (never commit)
+**/BMDs-*.zip
+**/bmds-samples/
+**/downloads/
+/hd/
+c4f488ef-*

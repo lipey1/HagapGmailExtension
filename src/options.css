@@ -1,0 +1,164 @@
+:root {
+  --hagap-primary: #5271ff;
+  --hagap-accent: #f08716;
+  --hagap-dark: #24303f;
+  --hagap-muted: #969aa1;
+  --hagap-border: #aeb7c0;
+  --bg: #eef1f8;
+  --card: #ffffff;
+  --text: #24303f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(70% 50% at 10% -10%, rgba(82, 113, 255, 0.22), transparent 60%),
+    radial-gradient(55% 40% at 100% 0%, rgba(240, 135, 22, 0.16), transparent 55%),
+    linear-gradient(180deg, #f5f7fd, var(--bg));
+}
+
+.shell {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+}
+
+.hero {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.mark {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: #24303f;
+  box-shadow: 0 10px 24px rgba(82, 113, 255, 0.28);
+  display: block;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hagap-primary);
+  font-weight: 700;
+}
+
+h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.lead {
+  margin: 8px 0 0;
+  color: var(--hagap-muted);
+  line-height: 1.45;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid rgba(174, 183, 192, 0.55);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(36, 48, 63, 0.05);
+}
+
+.card.muted {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.card h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--hagap-muted);
+  line-height: 1.45;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.field span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  border: 1px solid var(--hagap-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  background: #fff;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 2px solid rgba(82, 113, 255, 0.3);
+  border-color: var(--hagap-primary);
+}
+
+ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--hagap-dark);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+code {
+  font-size: 12px;
+  background: rgba(82, 113, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.actions {
+  margin-top: 8px;
+}
+
+.btn {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 18px;
+  font: inherit;
+  font-weight: 650;
+  font-size: 14px;
+  color: #fff;
+  background: var(--hagap-primary);
+  cursor: pointer;
+}
+
+.btn:hover {
+  filter: brightness(1.05);
+}
+
+.status {
+  min-height: 20px;
+  margin: 10px 0 0;
+  color: var(--hagap-primary);
+  font-size: 13px;
+}

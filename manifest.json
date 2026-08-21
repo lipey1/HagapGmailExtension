@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Hagap BMDs para Gmail",
+  "version": "1.6.7",
+  "description": "Aba BMDs no Gmail: download em lote da lista (ZIP), sem abrir e-mails um a um.",
+  "permissions": ["storage", "downloads", "downloads.ui", "downloads.shelf", "offscreen"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://*.googleusercontent.com/*",
+    "https://mail-attachment.googleusercontent.com/*"
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Hagap BMDs",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["src/vendor/jszip.min.js", "src/content.js"],
+      "css": ["src/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/logo.png",
+        "icons/logo-icon.svg",
+        "icons/icon48.png"
+      ],
+      "matches": ["https://mail.google.com/*"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hagap BMDs</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img class="logo" src="../icons/logo.png" alt="Hagap" width="36" height="36" />
+      <div>
+        <h1>BMDs</h1>
+        <p class="sub">Filtro de e-mails enviados com anexos</p>
+      </div>
+    </header>
+
+    <label class="field">
+      <span>Destinatário</span>
+      <input
+        id="destinatario"
+        type="email"
+        placeholder="email@empresa.com"
+        autocomplete="email"
+      />
+      <small>E-mails que você enviou <strong>para</strong> este endereço.</small>
+    </label>
+
+    <label class="field">
+      <span>Modo padrão</span>
+      <select id="filterMode">
+        <option value="days">Por dias</option>
+        <option value="period">Por período</option>
+      </select>
+    </label>
+
+    <div class="row" id="daysRow">
+      <label class="field grow">
+        <span>Janela</span>
+        <select id="daysValue">
+          <option value="7">7 dias</option>
+          <option value="30">30 dias</option>
+          <option value="all">Todos</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row" id="periodRow" hidden>
+      <label class="field grow">
+        <span>Período</span>
+        <select id="periodValue">
+          <option value="week">Semanal</option>
+          <option value="month">Mensal</option>
+          <option value="all">Todos</option>
+        </select>
+      </label>
+    </div>
+
+    <button type="button" id="save" class="btn">Salvar</button>
+    <p id="status" class="status" role="status"></p>
+    <a class="link" id="openOptions" href="#">Abrir configurações completas</a>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
