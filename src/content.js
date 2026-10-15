@@ -667,16 +667,23 @@
   }
 
   function findStableBarHost(tablist) {
+    const toolbar =
+      document.querySelector('div[gh="mtb"]') ||
+      document.querySelector('div.G-atb') ||
+      document.querySelector('div.aeH');
+    if (toolbar) return toolbar;
+
     if (tablist) {
       const underTabs =
         tablist.closest('.aKh') ||
+        tablist.closest('[gh="tl"]') ||
         tablist.parentElement;
-      if (underTabs && !underTabs.contains(findListAnchor())) return underTabs;
+      if (underTabs) return underTabs;
     }
 
     return (
-      document.querySelector('div[gh="tl"]')?.parentElement?.parentElement ||
-      document.querySelector('div[role="main"]')?.parentElement ||
+      document.querySelector('div.nH.aqK') ||
+      document.querySelector('div[role="main"]') ||
       document.body
     );
   }
@@ -685,17 +692,24 @@
     let bar = document.getElementById(EXT.BAR_ID);
     if (!bar) bar = createFilterBar();
 
-    const host = findStableBarHost(tablist);
-    if (!host) {
-      syncBarUI();
-      return bar;
-    }
+    const listAnchor = findListAnchor();
+    if (listAnchor?.parentElement) {
+      const parent = listAnchor.parentElement;
+      if (bar.nextElementSibling !== listAnchor || bar.parentElement !== parent) {
+        listAnchor.insertAdjacentElement('beforebegin', bar);
+      }
+    } else {
+      const host = findStableBarHost(tablist);
+      if (!host) {
+        syncBarUI();
+        return bar;
+      }
 
-    // Keep the toolbar outside Gmail's scrollable message list and its ancestors.
-    if (host === document.body) {
-      if (bar.parentElement !== document.body) document.body.prepend(bar);
-    } else if (bar.parentElement !== host || bar !== host.firstElementChild) {
-      host.prepend(bar);
+      if (host === document.body) {
+        if (bar.parentElement !== document.body) document.body.prepend(bar);
+      } else if (bar.previousElementSibling !== host || !bar.isConnected) {
+        host.insertAdjacentElement('afterend', bar);
+      }
     }
 
     // In-flow only. Never overlay message rows.
@@ -716,10 +730,32 @@
     const list = findListAnchor();
     if (!list) return;
 
-    if (list.dataset.hagapBmdsPad === '1') {
-      list.style.marginTop = '';
-      delete list.dataset.hagapBmdsPad;
+    const stacked =
+      bar &&
+      bar.classList.contains('is-visible') &&
+      bar.isConnected &&
+      bar.nextElementSibling === list;
+
+    if (!stacked) {
+      if (list.dataset.hagapBmdsPad === '1') {
+        list.style.marginTop = '';
+        delete list.dataset.hagapBmdsPad;
+      }
+      return;
     }
+
+    const cs = getComputedStyle(list);
+    if (cs.position !== 'absolute' && cs.position !== 'fixed') {
+      if (list.dataset.hagapBmdsPad === '1') {
+        list.style.marginTop = '';
+        delete list.dataset.hagapBmdsPad;
+      }
+      return;
+    }
+
+    const h = Math.ceil(bar.getBoundingClientRect().height);
+    list.dataset.hagapBmdsPad = '1';
+    list.style.marginTop = `${h}px`;
   }
 
   /** Category-row BMDs tab: always mount when Gmail category tabs exist. */
@@ -787,7 +823,6 @@
       // Throttle bar updates only when the BMDs tab is already mounted.
       if (now - lastInjectAt < 250 && document.getElementById(EXT.BAR_ID) && isBmdsTabInCategoryBar()) {
         if (shouldShowBmdsBar()) {
-          placeFilterBar(findCategoryTablist());
           setActive(true);
           ensureBarVisible();
         }
