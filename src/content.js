@@ -163,42 +163,19 @@
   }
 
   function shouldShowBmdsBar() {
-    if (downloadBusy) return true;
-    // Leaving inbox/labels must win over forceBarUntil (avoid ~1–2s linger).
-    if (isLeavingBmdsContext()) return false;
-    if (Date.now() < forceBarUntil) return true;
-    if (queryMentionsConfiguredDestinatario()) return true;
-
-    if (!(active || readSessionActive())) return false;
-
-    const hash = location.hash || '';
-    // Native non-search views: hide (Voltar / category).
-    if (
-      !hash.includes('#search/') &&
-      /#(inbox|sent|starred|snoozed|drafts|spam|trash|category\/|label\/|all)(?:[/?]|$)/.test(hash)
-    ) {
-      return false;
-    }
-
-    const q = getCurrentGmailQuery();
-    // Manual search to another recipient: hide even if BMDs session was on.
-    if (/to\s*:/i.test(q) && !queryMentionsConfiguredDestinatario(q)) return false;
-
-    // Session still on (e.g. BMDs tab just clicked, hash lagging).
-    return true;
+    return isBmdsSearchHash();
   }
 
-  /** True when hash is inbox/labels/other search without configured to:. Ignores forceBarUntil. */
+  /** True unless the current Gmail route contains the full BMDs search query. */
   function isLeavingBmdsContext(hash = location.hash || '') {
-    if (downloadBusy) return false;
-    if (!hash.includes('#search/')) {
-      return /#(inbox|sent|starred|snoozed|drafts|spam|trash|category\/|label\/|all)(?:[/?]|$)/.test(
-        hash
-      );
-    }
+    if (!hash.includes('#search/')) return true;
     const q = getQueryFromHash(hash);
     if (!q) return true;
-    return !queryMentionsConfiguredDestinatario(q);
+    return !(
+      q.toLowerCase().includes('from:me') &&
+      q.toLowerCase().includes('has:attachment') &&
+      queryMentionsConfiguredDestinatario(q)
+    );
   }
 
   function armBarForce(ms = 2500) {
@@ -785,9 +762,10 @@
     // Keep filter bar available during search even when category tabs unmount
     placeFilterBar(tablist);
 
-    if (isLeavingBmdsContext() && !downloadBusy) {
+    if (isLeavingBmdsContext()) {
       // Hide toolbar only; ensureBmdsTab already ran (and leave re-ensures).
-      leaveBmdsContextImmediate();
+      if (downloadBusy) hideBarOnly();
+      else leaveBmdsContextImmediate();
       return Boolean(tablist || document.getElementById(EXT.BAR_ID));
     }
 
@@ -815,8 +793,9 @@
     injectRafId = requestAnimationFrame(() => {
       injectRafId = 0;
       injectScheduled = false;
-      if (isLeavingBmdsContext() && !downloadBusy) {
-        leaveBmdsContextImmediate();
+      if (isLeavingBmdsContext()) {
+        if (downloadBusy) hideBarOnly();
+        else leaveBmdsContextImmediate();
         return;
       }
       const now = Date.now();
@@ -825,6 +804,8 @@
         if (shouldShowBmdsBar()) {
           setActive(true);
           ensureBarVisible();
+        } else {
+          hideBarOnly();
         }
         return;
       }
@@ -2287,7 +2268,8 @@
       setDownloadBusy(false);
       setActive(true);
       scheduleInject();
-      ensureBarVisible();
+      if (shouldShowBmdsBar()) ensureBarVisible();
+      else hideBarOnly();
       setTimeout(() => setBarStatus(''), 8000);
     }
   }
@@ -2837,7 +2819,8 @@
 
   function syncBarVisibilityFromContext() {
     if (downloadBusy) {
-      ensureBarVisible();
+      if (shouldShowBmdsBar()) ensureBarVisible();
+      else hideBarOnly();
       scheduleInject();
       return;
     }
@@ -2919,7 +2902,7 @@
       return;
     }
 
-    if (active && changes.destinatario) runFilter();
+    if (active && changes.destinatario && isBmdsSearchHash()) runFilter();
   });
 
   async function init() {
@@ -2935,13 +2918,15 @@
     ensureBmdsTab();
 
     const observer = new MutationObserver(() => {
-      if (isLeavingBmdsContext() && !downloadBusy) {
+      if (isLeavingBmdsContext()) {
         // Hide toolbar, but still reinject BMDs tab if Gmail remounted the row.
-        leaveBmdsContextImmediate();
+        if (downloadBusy) hideBarOnly();
+        else leaveBmdsContextImmediate();
         return;
       }
       scheduleInject();
       if (shouldShowBmdsBar()) ensureBarVisible();
+      else hideBarOnly();
     });
     observer.observe(document.documentElement, {
       childList: true,
