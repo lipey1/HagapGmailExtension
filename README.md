@@ -19,7 +19,8 @@ Paleta visual inspirada em [hagapsystems.cloud](https://hagapsystems.cloud) (`#5
 - Destinatário configurável (salvo em `chrome.storage`, nunca hardcoded no código)
 - Filtros: **Por dias** (7 / 30 / Todos), **Por período** (Semanal / Mensal / Todos), **Customizado** (início/fim inclusivos)
 - **Baixar BMDs**: permanece na lista, descobre anexos sem abrir e-mail por e-mail, gera ZIP quando há mais de um arquivo
-- Progresso na barra (`Encontrando anexos…`, `Baixando…`, `Gerando ZIP…`)
+- Lotes grandes: **um único ZIP** (`BMDs-YYYY-MM-DD.zip`); arquivos vão um a um para o documento offscreen (JSZip), sem estourar o limite de mensagem do MV3
+- Progresso na barra (`Encontrando anexos…`, `Baixando arquivos… 45 de 200`, `Gerando ZIP…`)
 - Paleta e logo Hagap
 
 ## Instalação (Load unpacked)
@@ -30,7 +31,7 @@ Paleta visual inspirada em [hagapsystems.cloud](https://hagapsystems.cloud) (`#5
 4. Selecione a pasta deste repositório (a que contém `manifest.json`)
 5. Abra o Gmail (`https://mail.google.com`) e recarregue a página se necessário
 
-Se a extensão já estava carregada, use **Atualizar** em `chrome://extensions` após puxar mudanças (novas permissões pedem confirmação).
+Se a extensão já estava carregada como **descompactada**, use o ícone **Atualizar** em `chrome://extensions` para recarregar os arquivos da pasta e depois recarregue o Gmail. Esse botão não altera o número da versão: ele continua sendo o valor de `version` em `manifest.json`. Para uma cópia instalada pela Chrome Web Store, a atualização depende de publicar uma nova versão na loja.
 
 ## Configuração
 
@@ -54,7 +55,7 @@ Com o filtro BMDs ativo (aba ou busca com o destinatário configurado), a barra 
 | Por dias / Por período | Troca os chips e aplica o filtro do chip selecionado (sem sumir a barra) |
 | Chips de tempo | Aplicam a busca no Gmail |
 | **Customizado** | Modal com data início/fim (inclusivo). Persistido em `chrome.storage`. O operador Gmail `before:` é exclusivo: a extensão usa o dia seguinte à data fim |
-| **Baixar BMDs** | Fica na **lista** (não abre e-mail por e-mail). Expande **Mais…**, lê chips/`download_url`, fetch silencioso e probe `attid`. Com **mais de 1** anexo: um `BMDs-YYYY-MM-DD.zip`. Com **1**: download nativo |
+| **Baixar BMDs** | Fica na **lista** (não abre e-mail por e-mail). Expande **Mais…**, lê chips/`download_url`, fetch silencioso e probe `attid`. Com **mais de 1** anexo: um ZIP. Com **1**: download nativo |
 | **Voltar** | Sai da busca BMDs e volta para `#inbox` |
 | Engrenagem | Abre as opções |
 
@@ -64,8 +65,10 @@ Logs no console do DevTools: `[Hagap BMDs]`.
 
 1. A extensão permanece na **visão de lista** do Gmail (não navega thread a thread).
 2. Descobre anexos a partir dos chips da lista (`download_url`), fetch same-origin autenticado e, se preciso, probe de `attid`.
-3. Com vários arquivos, monta um ZIP (JSZip) e dispara o download via API Chrome Downloads.
-4. Com um único anexo, usa download nativo.
+3. Com vários arquivos, busca com concorrência limitada (retries) e envia cada anexo (ou chunks de 2 MB) para o documento **offscreen**, que monta **um** ZIP com JSZip.
+4. Ao terminar, o offscreen gera o blob, cria a blob URL e o service worker dispara **um** `chrome.downloads.download` (`BMDs-YYYY-MM-DD.zip`). O ZIP completo nunca atravessa `sendMessage` como um base64 gigante.
+5. Anexos que falharem no fetch são pulados; o toast reporta `ZIP: 180 de 200 (20 falharam)` e o arquivo ainda contém o que deu certo.
+6. Com um único anexo, usa download nativo.
 
 ### Limitações
 
@@ -73,6 +76,7 @@ Logs no console do DevTools: `[Hagap BMDs]`.
 - Cobre a **página de resultados visível** (role no Gmail se precisar de mais linhas).
 - Depende do HTML/endpoints internos do Gmail (podem mudar).
 - Nomes colidentes no ZIP recebem prefixo `01_`, `02_`, … e sufixo se ainda houver conflito.
+- Em listas muito grandes, o pico de memória fica no offscreen (builder do ZIP); o content script só mantém poucos anexos em paralelo.
 
 ## Filtros (operadores Gmail)
 
@@ -89,7 +93,7 @@ Logs no console do DevTools: `[Hagap BMDs]`.
 | --- | --- |
 | `storage` | Salvar destinatário, modo de filtro e período customizado |
 | `downloads` / `downloads.ui` / `downloads.shelf` | Baixar anexos e o ZIP gerado |
-| `offscreen` | Montar blob/URL do ZIP fora do service worker quando necessário |
+| `offscreen` | Montar o ZIP (JSZip) e criar blob URL fora do service worker |
 | `https://mail.google.com/*` | Injetar a aba/barra e ler a lista |
 | `https://*.googleusercontent.com/*` e anexos | Fetch dos arquivos de anexo com a sessão do Google |
 
@@ -113,7 +117,7 @@ HagapGmailExtension/
     └── options.html|css|js
 ```
 
-Versão atual: ver `manifest.json` (ex.: `1.6.7`).
+Versão atual: ver `manifest.json` (ex.: `1.8.2`).
 
 ## Screenshots
 
@@ -128,7 +132,7 @@ Adicione capturas locais (opcional) em `docs/screenshots/` se quiser documentar 
 ## Desenvolvimento
 
 1. Edite os arquivos em `src/`
-2. Em `chrome://extensions`, clique em **Atualizar** na extensão
+2. Altere `version` em `manifest.json` quando quiser registrar uma nova versão; o botão **Atualizar** apenas recarrega os arquivos da extensão descompactada
 3. Recarregue o Gmail
 
 Não commite `.env`, perfis Chrome, ZIPs de BMDs baixados, nem e-mails reais de destinatário.

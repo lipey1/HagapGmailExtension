@@ -21,7 +21,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || !msg.type) return false;
 
   // Handled by the offscreen document, not the service worker.
-  if (msg.type === 'OFFSCREEN_CREATE_BLOB_URL' || msg.type === 'OFFSCREEN_REVOKE_BLOB_URL') {
+  if (
+    msg.type === 'OFFSCREEN_CREATE_BLOB_URL' ||
+    msg.type === 'OFFSCREEN_REVOKE_BLOB_URL' ||
+    msg.type === 'OFFSCREEN_BLOB_BEGIN' ||
+    msg.type === 'OFFSCREEN_BLOB_CHUNK' ||
+    msg.type === 'OFFSCREEN_BLOB_FINISH' ||
+    msg.type === 'OFFSCREEN_BLOB_ABORT' ||
+    msg.type === 'OFFSCREEN_ZIP_BEGIN' ||
+    msg.type === 'OFFSCREEN_ZIP_ADD' ||
+    msg.type === 'OFFSCREEN_ZIP_FILE_BEGIN' ||
+    msg.type === 'OFFSCREEN_ZIP_FILE_CHUNK' ||
+    msg.type === 'OFFSCREEN_ZIP_FILE_FINISH' ||
+    msg.type === 'OFFSCREEN_ZIP_FINISH' ||
+    msg.type === 'OFFSCREEN_ZIP_ABORT' ||
+    msg.type === 'OFFSCREEN_ZIP_FILE_ABORT'
+  ) {
     return false;
   }
 
@@ -86,8 +101,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const mime = String(msg.mime || 'application/zip');
     const base64 = String(msg.base64 || '');
     (async () => {
-      let objectUrl = '';
-      let usedOffscreen = false;
       try {
         if (!base64) {
           sendResponse({ ok: false, error: 'ZIP vazio (sem bytes)' });
@@ -95,50 +108,337 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
 
         const built = await buildDownloadUrl(base64, mime);
-        objectUrl = built.url;
-        usedOffscreen = built.viaOffscreen;
-
-        const uiOk = await ensureDownloadsUiEnabled();
-
-        // Flat name in Downloads root so the zip shows clearly in chrome://downloads
-        // and the native shelf/bubble (same as a normal Chrome download).
-        // If another extension keeps the shelf/bubble disabled, use Save dialog
-        // so the user still gets visible Chrome download UI.
-        const forceSaveAs = !uiOk;
-        let res = await startDownload(objectUrl, filename, {
-          flat: true,
-          saveAs: forceSaveAs,
-          waitMs: 120000,
-        });
-
-        // If quiet download failed, force Save dialog (visible Chrome UI).
-        if (!res.ok && !forceSaveAs) {
-          console.warn('[Hagap BMDs] quiet download failed, retrying with saveAs', res.error);
-          await ensureDownloadsUiEnabled();
-          res = await startDownload(objectUrl, filename, {
-            flat: true,
-            saveAs: true,
-            waitMs: 120000,
-          });
-        }
-
+        const res = await downloadObjectUrl(built.url, filename, built.viaOffscreen);
         sendResponse(res);
       } catch (err) {
         console.error('[Hagap BMDs] DOWNLOAD_BYTES failed', err);
         sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
-      } finally {
-        // Revoke only after chrome.downloads has finished (or failed). Early revoke
-        // cancels the blob fetch and leaves a fake "success" with no file.
-        if (objectUrl) {
-          await revokeDownloadUrl(objectUrl, usedOffscreen);
-        }
       }
+    })();
+    return true;
+  }
+
+  /**
+   * Chunked ZIP transfer: content sends BEGIN + many small CHUNKs + FINISH so a
+   * large archive never hits chrome.runtime.sendMessage size limits (~64MB).
+   */
+  if (msg.type === 'DOWNLOAD_BYTES_BEGIN') {
+    const transferId = String(msg.transferId || '');
+    const mime = String(msg.mime || 'application/zip');
+    const totalBytes = Math.max(0, Number(msg.totalBytes) || 0);
+    (async () => {
+      try {
+        if (!transferId) {
+          sendResponse({ ok: false, error: 'transferId vazio' });
+          return;
+        }
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_BLOB_BEGIN',
+          transferId,
+          mime,
+          totalBytes,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'DOWNLOAD_BYTES_CHUNK') {
+    const transferId = String(msg.transferId || '');
+    const base64 = String(msg.base64 || '');
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_BLOB_CHUNK',
+          transferId,
+          base64,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'DOWNLOAD_BYTES_FINISH') {
+    const transferId = String(msg.transferId || '');
+    const filename = sanitizeFilename(msg.filename) || 'BMDs.zip';
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const finished = await sendOffscreenMessage({
+          type: 'OFFSCREEN_BLOB_FINISH',
+          transferId,
+        });
+        if (!finished || !finished.ok || !finished.url) {
+          sendResponse({
+            ok: false,
+            error: (finished && finished.error) || 'offscreen não montou o ZIP',
+          });
+          return;
+        }
+        const res = await downloadObjectUrl(finished.url, filename, true);
+        sendResponse(res);
+      } catch (err) {
+        console.error('[Hagap BMDs] DOWNLOAD_BYTES_FINISH failed', err);
+        try {
+          await sendOffscreenMessage({ type: 'OFFSCREEN_BLOB_ABORT', transferId });
+        } catch {
+          /* ignore */
+        }
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'DOWNLOAD_BYTES_ABORT') {
+    const transferId = String(msg.transferId || '');
+    (async () => {
+      try {
+        await sendOffscreenMessage({ type: 'OFFSCREEN_BLOB_ABORT', transferId });
+      } catch {
+        /* ignore */
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  /**
+   * Streaming ZIP: content ships files one-by-one (or in small base64 chunks).
+   * Offscreen holds JSZip and emits ONE blob URL at the end.
+   */
+  if (msg.type === 'ZIP_BUILD_BEGIN') {
+    const sessionId = String(msg.sessionId || '');
+    (async () => {
+      try {
+        if (!sessionId) {
+          sendResponse({ ok: false, error: 'sessionId vazio' });
+          return;
+        }
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({ type: 'OFFSCREEN_ZIP_BEGIN', sessionId });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_ADD') {
+    const sessionId = String(msg.sessionId || '');
+    const entryName = String(msg.entryName || '');
+    const base64 = String(msg.base64 || '');
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_ADD',
+          sessionId,
+          entryName,
+          base64,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_FILE_BEGIN') {
+    const sessionId = String(msg.sessionId || '');
+    const entryName = String(msg.entryName || '');
+    const totalBytes = Math.max(0, Number(msg.totalBytes) || 0);
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_FILE_BEGIN',
+          sessionId,
+          entryName,
+          totalBytes,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_FILE_CHUNK') {
+    const sessionId = String(msg.sessionId || '');
+    const base64 = String(msg.base64 || '');
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_FILE_CHUNK',
+          sessionId,
+          base64,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_FILE_FINISH') {
+    const sessionId = String(msg.sessionId || '');
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_FILE_FINISH',
+          sessionId,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_FILE_ABORT') {
+    const sessionId = String(msg.sessionId || '');
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_FILE_ABORT',
+          sessionId,
+        });
+        sendResponse(res);
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_FINISH') {
+    const sessionId = String(msg.sessionId || '');
+    const filename = sanitizeFilename(msg.filename) || 'BMDs.zip';
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const finished = await sendOffscreenMessage({
+          type: 'OFFSCREEN_ZIP_FINISH',
+          sessionId,
+        });
+        if (!finished || !finished.ok || !finished.url) {
+          sendResponse({
+            ok: false,
+            error: (finished && finished.error) || 'offscreen não gerou o ZIP',
+            fileCount: finished && finished.fileCount,
+          });
+          return;
+        }
+        const res = await downloadObjectUrl(finished.url, filename, true);
+        sendResponse({
+          ...res,
+          fileCount: finished.fileCount,
+          bytes: finished.bytes,
+          zipName: filename,
+        });
+      } catch (err) {
+        console.error('[Hagap BMDs] ZIP_BUILD_FINISH failed', err);
+        try {
+          await sendOffscreenMessage({ type: 'OFFSCREEN_ZIP_ABORT', sessionId });
+        } catch {
+          /* ignore */
+        }
+        sendResponse({ ok: false, error: String(err && err.message ? err.message : err) });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'ZIP_BUILD_ABORT') {
+    const sessionId = String(msg.sessionId || '');
+    (async () => {
+      try {
+        await sendOffscreenMessage({ type: 'OFFSCREEN_ZIP_ABORT', sessionId });
+      } catch {
+        /* ignore */
+      }
+      sendResponse({ ok: true });
     })();
     return true;
   }
 
   return false;
 });
+
+/**
+ * Create blob URL (or data: fallback), trigger chrome.downloads, then revoke.
+ * @param {string} objectUrl
+ * @param {string} filename
+ * @param {boolean} viaOffscreen
+ */
+async function downloadObjectUrl(objectUrl, filename, viaOffscreen) {
+  try {
+    const uiOk = await ensureDownloadsUiEnabled();
+
+    // Flat name in Downloads root so the zip shows clearly in chrome://downloads
+    // and the native shelf/bubble (same as a normal Chrome download).
+    // If another extension keeps the shelf/bubble disabled, use Save dialog
+    // so the user still gets visible Chrome download UI.
+    const forceSaveAs = !uiOk;
+    let res = await startDownload(objectUrl, filename, {
+      flat: true,
+      saveAs: forceSaveAs,
+      waitMs: 120000,
+    });
+
+    // If quiet download failed, force Save dialog (visible Chrome UI).
+    if (!res.ok && !forceSaveAs) {
+      console.warn('[Hagap BMDs] quiet download failed, retrying with saveAs', res.error);
+      await ensureDownloadsUiEnabled();
+      res = await startDownload(objectUrl, filename, {
+        flat: true,
+        saveAs: true,
+        waitMs: 120000,
+      });
+    }
+
+    return res;
+  } finally {
+    // Revoke only after chrome.downloads has finished (or failed). Early revoke
+    // cancels the blob fetch and leaves a fake "success" with no file.
+    if (objectUrl) {
+      await revokeDownloadUrl(objectUrl, viaOffscreen);
+    }
+  }
+}
+
+/**
+ * @param {object} payload
+ * @returns {Promise<{ ok?: boolean, url?: string, error?: string, received?: number, bytes?: number }>}
+ */
+function sendOffscreenMessage(payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(payload, (res) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(res || { ok: false, error: 'sem resposta do offscreen' });
+    });
+  });
+}
 
 /**
  * Prefer offscreen blob: URL (works for large ZIPs). Fall back to data: URL when
@@ -188,7 +488,8 @@ async function ensureOffscreenDocument() {
     .createDocument({
       url: OFFSCREEN_PATH,
       reasons: ['BLOBS'],
-      justification: 'Create blob URLs for ZIP downloads (URL.createObjectURL unavailable in MV3 service workers)',
+      justification:
+        'Assemble one ZIP from streamed attachments and create blob URLs (unavailable in MV3 service workers)',
     })
     .catch((err) => {
       const msg = String(err && err.message ? err.message : err);

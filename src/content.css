@@ -148,20 +148,6 @@ body.bmd-dark .hagap-bmds-tab.is-active .hagap-bmds-tab__underline,
   display: none !important;
 }
 
-/* Keep list region as a column so the bar reserves height above rows */
-[data-hagap-bmds-host="1"] {
-  display: flex !important;
-  flex-direction: column !important;
-  min-height: 0;
-  overflow: visible !important;
-}
-
-[data-hagap-bmds-host="1"] > .aeF,
-[data-hagap-bmds-host="1"] > [gh="tl"] {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-}
-
 html[data-color-scheme="dark"] .hagap-bmds-bar,
 body.bmd-dark .hagap-bmds-bar {
   color: #e8eaed;

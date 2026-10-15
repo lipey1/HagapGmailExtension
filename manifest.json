@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hagap BMDs para Gmail",
-  "version": "1.6.7",
+  "version": "1.8.2",
   "description": "Aba BMDs no Gmail: download em lote da lista (ZIP), sem abrir e-mails um a um.",
   "permissions": ["storage", "downloads", "downloads.ui", "downloads.shelf", "offscreen"],
   "host_permissions": [
@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["https://mail.google.com/*"],
-      "js": ["src/vendor/jszip.min.js", "src/content.js"],
+      "js": ["src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_idle"
     }

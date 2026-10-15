@@ -7,7 +7,6 @@
     TOAST_ID: 'hagap-bmds-toast',
     MODAL_ID: 'hagap-bmds-modal',
     ATTR: 'data-hagap-bmds',
-    HOST_ATTR: 'data-hagap-bmds-host',
     SESSION_KEY: 'hagap-bmds-active',
   };
 
@@ -19,6 +18,13 @@
     customStart: '', // YYYY-MM-DD
     customEnd: '', // YYYY-MM-DD
   };
+
+  const FETCH_CONCURRENCY = 4;
+  const FETCH_RETRIES = 2;
+  /** Binary chunk size when shipping a single attachment to the offscreen ZIP builder. */
+  const TRANSFER_CHUNK_BYTES = 2 * 1024 * 1024;
+  /** Below this, one ZIP_BUILD_ADD message is fine (still under MV3 message limits). */
+  const SINGLE_MESSAGE_MAX_BYTES = 4 * 1024 * 1024;
 
   const LOG = (...args) => console.info('[Hagap BMDs]', ...args);
 
@@ -661,65 +667,34 @@
   }
 
   function findStableBarHost(tablist) {
-    // Prefer toolbar row above the message list so the bar pushes list down
-    const toolbar =
-      document.querySelector('div[gh="mtb"]') ||
-      document.querySelector('div.G-atb') ||
-      document.querySelector('div.aeH');
-    if (toolbar) return toolbar;
-
     if (tablist) {
       const underTabs =
         tablist.closest('.aKh') ||
-        tablist.closest('[gh="tl"]') ||
         tablist.parentElement;
-      if (underTabs) return underTabs;
+      if (underTabs && !underTabs.contains(findListAnchor())) return underTabs;
     }
 
     return (
-      document.querySelector('div.nH.aqK') ||
       document.querySelector('div[role="main"]') ||
       document.body
     );
-  }
-
-  function clearHostMarks() {
-    document.querySelectorAll(`[${EXT.HOST_ATTR}]`).forEach((el) => {
-      el.removeAttribute(EXT.HOST_ATTR);
-    });
   }
 
   function placeFilterBar(tablist) {
     let bar = document.getElementById(EXT.BAR_ID);
     if (!bar) bar = createFilterBar();
 
-    const listAnchor = findListAnchor();
-    if (listAnchor && listAnchor.parentElement) {
-      const parent = listAnchor.parentElement;
-      clearHostMarks();
-      parent.setAttribute(EXT.HOST_ATTR, '1');
+    const host = findStableBarHost(tablist);
+    if (!host) {
+      syncBarUI();
+      return bar;
+    }
 
-      // Prefer sibling above the list so Gmail list remounts do not swallow the bar.
-      // Fallback: first child inside the list region (still in document flow).
-      if (bar.nextElementSibling === listAnchor && bar.parentElement === parent && bar.isConnected) {
-        // already correctly placed
-      } else if (listAnchor.parentElement === parent) {
-        listAnchor.insertAdjacentElement('beforebegin', bar);
-      } else if (listAnchor.firstElementChild !== bar || !bar.isConnected) {
-        listAnchor.insertAdjacentElement('afterbegin', bar);
-      }
-    } else {
-      const host = findStableBarHost(tablist);
-      if (!host) {
-        syncBarUI();
-        return bar;
-      }
-
-      if (host === document.body) {
-        if (bar.parentElement !== document.body) document.body.prepend(bar);
-      } else if (bar.previousElementSibling !== host || !bar.isConnected) {
-        host.insertAdjacentElement('afterend', bar);
-      }
+    // Keep the toolbar outside Gmail's scrollable message list and its ancestors.
+    if (host === document.body) {
+      if (bar.parentElement !== document.body) document.body.prepend(bar);
+    } else if (bar.parentElement !== host || bar !== host.lastElementChild) {
+      host.appendChild(bar);
     }
 
     // In-flow only. Never overlay message rows.
@@ -740,32 +715,10 @@
     const list = findListAnchor();
     if (!list) return;
 
-    const stacked =
-      bar &&
-      bar.classList.contains('is-visible') &&
-      bar.isConnected &&
-      bar.nextElementSibling === list;
-
-    if (!stacked) {
-      if (list.dataset.hagapBmdsPad === '1') {
-        list.style.marginTop = '';
-        delete list.dataset.hagapBmdsPad;
-      }
-      return;
+    if (list.dataset.hagapBmdsPad === '1') {
+      list.style.marginTop = '';
+      delete list.dataset.hagapBmdsPad;
     }
-
-    const cs = getComputedStyle(list);
-    if (cs.position !== 'absolute' && cs.position !== 'fixed') {
-      if (list.dataset.hagapBmdsPad === '1') {
-        list.style.marginTop = '';
-        delete list.dataset.hagapBmdsPad;
-      }
-      return;
-    }
-
-    const h = Math.ceil(bar.getBoundingClientRect().height);
-    list.dataset.hagapBmdsPad = '1';
-    list.style.marginTop = `${h}px`;
   }
 
   /** Category-row BMDs tab: always mount when Gmail category tabs exist. */
@@ -2250,24 +2203,34 @@
       });
 
       if (!result.zipOk) {
-        const errMsg = result.error
-          ? `Falha ao baixar ZIP: ${result.error}`
-          : 'Falha ao baixar ZIP (nenhum arquivo salvo).';
-        setBarStatus('Falha ao baixar ZIP');
+        const reason = classifyDownloadError(result.error || 'nenhum arquivo salvo');
+        const errMsg = `Falha ao baixar ZIP: ${reason}`;
+        setBarStatus(`Falha no download: ${reason}`);
         showToast(errMsg);
         console.error('[Hagap BMDs]', errMsg, result);
         return;
       }
 
-      const zipLabel = result.zipName ? ` (${result.zipName})` : '';
-      const msg = `ZIP baixado: ${result.downloaded} de ${result.found} anexo(s)${zipLabel}.`;
-      setBarStatus('ZIP baixado');
-      showToast(msg + ' Veja o popup de Downloads do Chrome.');
-      LOG(msg, 'downloadId=', result.downloadId);
+      const toastMsg = formatZipResultMessage(result);
+      setBarStatus(
+        result.failed > 0 || result.downloaded !== result.found
+          ? `ZIP parcial: ${result.downloaded} de ${result.found}`
+          : 'ZIP baixado'
+      );
+      showToast(`${toastMsg} Veja o popup de Downloads do Chrome.`);
+      LOG(toastMsg, 'stats=', {
+        discovered: result.found,
+        addedToZip: result.downloaded,
+        fetchFailed: result.fetchFailed,
+        zipAddFailed: result.zipAddFailed,
+        skippedInvalid: result.skippedInvalid,
+        zipFileCount: result.zipFileCount,
+      }, 'downloadIds=', result.downloadIds);
     } catch (err) {
       console.error('[Hagap BMDs] download failed', err);
-      setBarStatus('Falha no download');
-      showToast('Não foi possível baixar os anexos.');
+      const reason = classifyDownloadError(err);
+      setBarStatus(`Falha no download: ${reason}`);
+      showToast(`Não foi possível baixar os anexos: ${reason}`);
     } finally {
       // If something opened a thread (#search/q/threadId), snap back to the list hash.
       const cleanList = searchHashWithoutThread();
@@ -2403,12 +2366,12 @@
   function uniqueZipEntryName(filename, threadIndex, used) {
     const raw = sanitizeZipFilename(filename) || 'anexo.pdf';
     const idx = threadIndex >= 0 ? String(threadIndex + 1).padStart(2, '0') : '00';
-    let base = `${idx}_${raw}`;
+    const base = `${idx}_${raw}`;
     let candidate = base;
     let n = 2;
     while (used.has(candidate.toLowerCase())) {
       const m = base.match(/^(.*)(\.[^.]+)$/);
-      candidate = m ? `${m[1]}_${n}${m[2]}` : `${base}_${n}`;
+      candidate = m ? `${m[1]} (${n})${m[2]}` : `${base} (${n})`;
       n += 1;
     }
     used.add(candidate.toLowerCase());
@@ -2421,6 +2384,27 @@
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `BMDs-${y}-${m}-${day}.zip`;
+  }
+
+  function classifyDownloadError(err) {
+    const msg = String(err && err.message != null ? err.message : err || '').trim();
+    if (!msg) return 'erro desconhecido';
+    if (/quota|out of memory|oom|memory/i.test(msg)) {
+      return `memória insuficiente (${msg})`;
+    }
+    if (/message port closed|message length|too large|maximum.*size|Oversized/i.test(msg)) {
+      return `tamanho / limite de mensagem MV3 (${msg})`;
+    }
+    if (/permission|denied|user.?gesture/i.test(msg)) {
+      return `permissão de download (${msg})`;
+    }
+    if (/offscreen/i.test(msg)) {
+      return `documento offscreen (${msg})`;
+    }
+    if (/HTTP\s*[45]\d\d/i.test(msg)) {
+      return `falha ao buscar anexo (${msg})`;
+    }
+    return msg;
   }
 
   async function fetchAttachmentBlob(url) {
@@ -2449,6 +2433,33 @@
     }
   }
 
+  async function fetchAttachmentBlobWithRetry(url, retries = FETCH_RETRIES) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await fetchAttachmentBlob(url);
+      } catch (err) {
+        lastErr = err;
+        if (attempt < retries) {
+          await sleep(250 * (attempt + 1));
+        }
+      }
+    }
+    throw lastErr || new Error('falha ao buscar anexo');
+  }
+
+  function runtimeSend(payload) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(payload, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response || { ok: false, error: 'sem resposta do background' });
+      });
+    });
+  }
+
   function triggerBlobDownload(blob, filename) {
     const objectUrl = URL.createObjectURL(blob);
     try {
@@ -2473,7 +2484,13 @@
 
   async function blobToBase64(blob) {
     const buf = await blob.arrayBuffer();
-    const bytes = new Uint8Array(buf);
+    return uint8ToBase64(new Uint8Array(buf));
+  }
+
+  /**
+   * @param {Uint8Array} bytes
+   */
+  function uint8ToBase64(bytes) {
     const chunk = 0x8000;
     let binary = '';
     for (let i = 0; i < bytes.length; i += chunk) {
@@ -2483,131 +2500,286 @@
   }
 
   /**
-   * ZIP download via service worker + chrome.downloads only.
-   * Must register in Chrome's native Downloads UI (shelf / bubble popup).
-   * Do NOT fall back to content-script <a download>: that often never appears
-   * in chrome://downloads while the toast still claimed success.
+   * Ship one attachment into the offscreen JSZip session.
+   * Small files: one message. Large files: 2MB base64 chunks (never one giant sendMessage).
    */
-  async function downloadBlobViaExtension(blob, filename, mime = 'application/zip') {
-    const base64 = await blobToBase64(blob);
-    const res = await new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: 'DOWNLOAD_BYTES',
-          base64,
-          filename,
-          mime,
-        },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: chrome.runtime.lastError.message });
-            return;
-          }
-          resolve(response || { ok: false, error: 'sem resposta do background' });
-        }
-      );
-    });
-    if (res && res.ok && res.id != null) {
-      LOG('chrome.downloads ZIP ok', filename, res.id, res.state);
-      return res;
+  async function addBlobToZipSession(sessionId, entryName, blob) {
+    if (!blob || !blob.size) {
+      return { ok: false, error: 'arquivo vazio' };
     }
-    const err = (res && res.error) || 'chrome.downloads não confirmou o ZIP';
-    console.error('[Hagap BMDs] ZIP download failed', err);
-    return { ok: false, error: err };
+
+    if (blob.size <= SINGLE_MESSAGE_MAX_BYTES) {
+      const base64 = await blobToBase64(blob);
+      return runtimeSend({
+        type: 'ZIP_BUILD_ADD',
+        sessionId,
+        entryName,
+        base64,
+      });
+    }
+
+    const begin = await runtimeSend({
+      type: 'ZIP_BUILD_FILE_BEGIN',
+      sessionId,
+      entryName,
+      totalBytes: blob.size,
+    });
+    if (!begin || !begin.ok) {
+      return {
+        ok: false,
+        error: (begin && begin.error) || 'falha ao iniciar transferência do arquivo',
+      };
+    }
+
+    try {
+      const buf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      for (let offset = 0; offset < bytes.length; offset += TRANSFER_CHUNK_BYTES) {
+        const slice = bytes.subarray(offset, Math.min(offset + TRANSFER_CHUNK_BYTES, bytes.length));
+        const chunkRes = await runtimeSend({
+          type: 'ZIP_BUILD_FILE_CHUNK',
+          sessionId,
+          base64: uint8ToBase64(slice),
+        });
+        if (!chunkRes || !chunkRes.ok) {
+          throw new Error((chunkRes && chunkRes.error) || `falha no chunk @${offset}`);
+        }
+      }
+      return runtimeSend({ type: 'ZIP_BUILD_FILE_FINISH', sessionId });
+    } catch (err) {
+      await runtimeSend({ type: 'ZIP_BUILD_FILE_ABORT', sessionId });
+      const msg = String(err && err.message ? err.message : err);
+      return { ok: false, error: msg };
+    }
+  }
+
+  function formatZipResultMessage(result) {
+    const downloaded = result.downloaded || 0;
+    const found = result.found || 0;
+    const failed = result.failed || 0;
+    const zipLabel = result.zipName ? ` (${result.zipName})` : '';
+    if (failed <= 0 && downloaded === found) {
+      return `ZIP baixado: ${downloaded} de ${found}${zipLabel}.`;
+    }
+    const reasons = [];
+    if (result.fetchFailed > 0) reasons.push(`${result.fetchFailed} busca`);
+    if (result.zipAddFailed > 0) reasons.push(`${result.zipAddFailed} add ZIP`);
+    if (result.skippedInvalid > 0) reasons.push(`${result.skippedInvalid} inválido`);
+    const reasonBit = reasons.length ? `: ${reasons.join(', ')}` : '';
+    const failWord = failed === 1 ? 'falhou' : 'falharam';
+    return `ZIP baixado: ${downloaded} de ${found} (${failed} ${failWord}${reasonBit})${zipLabel}.`;
+  }
+
+  function logZipAttachmentIssue(kind, item, extra = {}) {
+    const url = String(item && item.url ? item.url : '');
+    console.error('[Hagap BMDs]', kind, {
+      threadId: (item && item.threadId) || threadIdFromUrl(url) || '',
+      threadIndex: item && item.threadIndex,
+      filename: (item && item.filename) || '',
+      url: url.slice(0, 160),
+      ...extra,
+    });
   }
 
   /**
-   * Fetch each attachment with Gmail session cookies, pack into one ZIP, one download.
+   * Fetch attachments with limited concurrency, stream each into offscreen JSZip,
+   * then generate ONE ZIP and download once via chrome.downloads.
+   * Content never holds the full archive; at most FETCH_CONCURRENCY blobs live here.
+   * Success only counts after offscreen confirms the file was added.
    * @param {'fetch'|'zip'} phase via onProgress
    * @param {number} [total] frozen discovery total (do not use a growing length)
    */
   async function downloadItemsAsZip(items, { onProgress, total } = {}) {
-    const JSZipCtor = typeof JSZip !== 'undefined' ? JSZip : globalThis.JSZip;
-    if (!JSZipCtor) {
-      throw new Error('JSZip não carregou');
-    }
-
     const queue = Array.isArray(items) ? items.slice() : [];
     const frozenTotal = typeof total === 'number' && total >= 0 ? total : queue.length;
-    const zip = new JSZipCtor();
     const usedNames = new Set();
-    const usedHashes = new Set();
-    let okCount = 0;
+    let addedToZip = 0;
+    let fetchFailed = 0;
+    let zipAddFailed = 0;
+    let skippedInvalid = 0;
+    let processed = 0;
 
-    for (let i = 0; i < queue.length; i += 1) {
-      const item = queue[i];
-      if (onProgress) onProgress('fetch', i, frozenTotal);
-      try {
-        const blob = await fetchAttachmentBlob(item.url);
-        const ctype = (blob.type || '').toLowerCase();
-        if (ctype.includes('text/html') || ctype.includes('image/')) {
-          LOG('skip non-document blob', item.filename || item.url, ctype);
-          if (onProgress) onProgress('fetch', i + 1, frozenTotal);
-          continue;
-        }
-        // Drop exact duplicate payloads (same PDF discovered under different names).
-        const hash = await blobContentHash(blob);
-        const hashKey = `${item.threadId || item.threadIndex || ''}|${hash}`;
-        if (hash && usedHashes.has(hashKey)) {
-          LOG('skip duplicate content', item.filename || item.url);
-          if (onProgress) onProgress('fetch', i + 1, frozenTotal);
-          continue;
-        }
-        if (hash) usedHashes.add(hashKey);
-
-        const entry = uniqueZipEntryName(item.filename, item.threadIndex ?? i, usedNames);
-        zip.file(entry, blob);
-        okCount += 1;
-        LOG('zip +', entry, `(${blob.size} bytes)`);
-      } catch (err) {
-        console.error('[Hagap BMDs] zip fetch failed', item.filename || item.url, err);
-        LOG('zip fetch failed', item.filename || item.url, err);
-      }
-      if (onProgress) onProgress('fetch', i + 1, frozenTotal);
-    }
-
-    if (okCount === 0) {
-      return { found: frozenTotal, downloaded: 0, zipName: '', zipOk: false };
-    }
-
-    if (onProgress) onProgress('zip', okCount, frozenTotal);
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const sessionId = `zip_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const zipName = bmdsZipFilename();
-    LOG('generated ZIP', zipName, `${zipBlob.size} bytes`, `${okCount} files`);
-    const dl = await downloadBlobViaExtension(zipBlob, zipName, 'application/zip');
-    if (!dl || !dl.ok) {
-      console.error('[Hagap BMDs] ZIP not saved to Downloads', dl?.error);
+
+    const emptyResult = (extra = {}) => ({
+      found: frozenTotal,
+      downloaded: 0,
+      failed: fetchFailed + zipAddFailed + skippedInvalid,
+      fetchFailed,
+      zipAddFailed,
+      skippedInvalid,
+      zipName: '',
+      zipOk: false,
+      zipFileCount: 0,
+      downloadIds: [],
+      ...extra,
+    });
+
+    const begin = await runtimeSend({ type: 'ZIP_BUILD_BEGIN', sessionId });
+    if (!begin || !begin.ok) {
+      return emptyResult({
+        error: (begin && begin.error) || 'falha ao iniciar sessão ZIP',
+      });
+    }
+
+    try {
+      for (let i = 0; i < queue.length; i += FETCH_CONCURRENCY) {
+        const batch = queue.slice(i, i + FETCH_CONCURRENCY);
+        // Fetch concurrently; add to offscreen ZIP sequentially so memory stays bounded
+        // and FINISH cannot race a pending ADD.
+        const fetched = await Promise.all(
+          batch.map(async (item, batchIdx) => {
+            const index = i + batchIdx;
+            try {
+              const blob = await fetchAttachmentBlobWithRetry(item.url);
+              return { item, index, blob, error: null };
+            } catch (err) {
+              return { item, index, blob: null, error: err };
+            }
+          })
+        );
+
+        for (const row of fetched) {
+          processed += 1;
+          if (row.error || !row.blob) {
+            fetchFailed += 1;
+            logZipAttachmentIssue('zip fetch failed', row.item, {
+              error: String(row.error && row.error.message ? row.error.message : row.error || 'sem blob'),
+            });
+            LOG('zip fetch failed', row.item.filename || row.item.url, row.error);
+            if (onProgress) onProgress('fetch', processed, frozenTotal);
+            continue;
+          }
+
+          const { item, index, blob } = row;
+          const ctype = (blob.type || '').toLowerCase();
+          if (ctype.includes('text/html') || ctype.includes('image/')) {
+            skippedInvalid += 1;
+            logZipAttachmentIssue('zip skip invalid blob', item, {
+              contentType: ctype,
+              error: `conteudo nao-documento (${ctype || 'desconhecido'})`,
+            });
+            LOG('skip non-document blob', item.filename || item.url, ctype);
+            if (onProgress) onProgress('fetch', processed, frozenTotal);
+            continue;
+          }
+
+          // Distinct th|attid already survived discovery; keep every discovered file.
+          // Filename collisions are uniquified (never overwrite ZIP entries).
+          const entry = uniqueZipEntryName(item.filename, item.threadIndex ?? index, usedNames);
+          const added = await addBlobToZipSession(sessionId, entry, blob);
+          // Drop local blob ASAP; offscreen JSZip owns the bytes now.
+          row.blob = null;
+
+          if (!added || !added.ok) {
+            zipAddFailed += 1;
+            logZipAttachmentIssue('zip add failed', item, {
+              entryName: entry,
+              error: (added && added.error) || 'offscreen nao confirmou add',
+            });
+            LOG('zip add failed', entry, added && added.error);
+            if (onProgress) onProgress('fetch', processed, frozenTotal);
+            continue;
+          }
+
+          // Only count success after offscreen confirms the entry.
+          addedToZip += 1;
+          const offscreenCount = Number(added.fileCount) || 0;
+          if (offscreenCount > 0 && offscreenCount !== addedToZip) {
+            console.error('[Hagap BMDs] addedToZip vs offscreen fileCount', {
+              addedToZip,
+              offscreenCount,
+              entry: added.entryName || entry,
+            });
+          }
+          LOG('zip +', added.entryName || entry, `(${added.bytes || '?'} bytes)`, `${addedToZip}/${frozenTotal}`);
+          if (onProgress) onProgress('fetch', processed, frozenTotal);
+        }
+      }
+
+      const failed = fetchFailed + zipAddFailed + skippedInvalid;
+
+      if (addedToZip === 0) {
+        await runtimeSend({ type: 'ZIP_BUILD_ABORT', sessionId });
+        return emptyResult({
+          failed,
+          error:
+            failed > 0
+              ? `${failed} anexo(s) falharam ao buscar/adicionar`
+              : 'nenhum arquivo válido para o ZIP',
+        });
+      }
+
+      if (onProgress) onProgress('zip', addedToZip, frozenTotal);
+      LOG('generating single ZIP', zipName, `${addedToZip} files confirmed`);
+
+      const finished = await runtimeSend({
+        type: 'ZIP_BUILD_FINISH',
+        sessionId,
+        filename: zipName,
+      });
+
+      if (!finished || !finished.ok) {
+        return {
+          found: frozenTotal,
+          downloaded: addedToZip,
+          failed,
+          fetchFailed,
+          zipAddFailed,
+          skippedInvalid,
+          zipName,
+          zipOk: false,
+          zipFileCount: Number(finished && finished.fileCount) || 0,
+          error: (finished && finished.error) || 'falha ao baixar ZIP',
+          downloadIds: [],
+        };
+      }
+
+      const zipFileCount = Number(finished.fileCount) || 0;
+      if (zipFileCount > 0 && zipFileCount !== addedToZip) {
+        console.error('[Hagap BMDs] ZIP entry count mismatch', {
+          addedToZip,
+          zipFileCount,
+          discovered: frozenTotal,
+          fetchFailed,
+          zipAddFailed,
+          skippedInvalid,
+        });
+        // Trust offscreen real entry count for user-facing "downloaded".
+        if (zipFileCount < addedToZip) {
+          zipAddFailed += addedToZip - zipFileCount;
+          addedToZip = zipFileCount;
+        }
+      }
+
+      const downloadIds = finished.id != null ? [finished.id] : [];
+      LOG(
+        'chrome.downloads ZIP ok',
+        zipName,
+        finished.id,
+        finished.state,
+        `${finished.bytes || '?'} bytes`,
+        `entries=${zipFileCount || addedToZip}`
+      );
+
       return {
         found: frozenTotal,
-        downloaded: okCount,
+        downloaded: addedToZip,
+        failed: fetchFailed + zipAddFailed + skippedInvalid,
+        fetchFailed,
+        zipAddFailed,
+        skippedInvalid,
         zipName,
-        zipOk: false,
-        error: dl?.error || 'falha ao baixar ZIP',
+        zipOk: true,
+        zipFileCount: zipFileCount || addedToZip,
+        error: '',
+        downloadIds,
+        downloadId: downloadIds[0],
       };
-    }
-    return {
-      found: frozenTotal,
-      downloaded: okCount,
-      zipName,
-      zipOk: true,
-      downloadId: dl.id,
-    };
-  }
-
-  async function blobContentHash(blob) {
-    try {
-      const buf = await blob.arrayBuffer();
-      if (!buf || !buf.byteLength) return '';
-      // Fast fingerprint: size + first/last 64 bytes (good enough for PDF dupes).
-      const bytes = new Uint8Array(buf);
-      const head = bytes.slice(0, 64);
-      const tail = bytes.slice(Math.max(0, bytes.length - 64));
-      let h = bytes.length >>> 0;
-      for (const b of head) h = (Math.imul(h, 31) + b) >>> 0;
-      for (const b of tail) h = (Math.imul(h, 17) + b) >>> 0;
-      return `${bytes.length}:${h.toString(16)}`;
-    } catch {
-      return '';
+    } catch (err) {
+      await runtimeSend({ type: 'ZIP_BUILD_ABORT', sessionId });
+      throw err;
     }
   }
 
