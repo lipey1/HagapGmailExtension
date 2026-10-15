@@ -675,7 +675,8 @@
     }
 
     return (
-      document.querySelector('div[role="main"]') ||
+      document.querySelector('div[gh="tl"]')?.parentElement?.parentElement ||
+      document.querySelector('div[role="main"]')?.parentElement ||
       document.body
     );
   }
@@ -693,8 +694,8 @@
     // Keep the toolbar outside Gmail's scrollable message list and its ancestors.
     if (host === document.body) {
       if (bar.parentElement !== document.body) document.body.prepend(bar);
-    } else if (bar.parentElement !== host || bar !== host.lastElementChild) {
-      host.appendChild(bar);
+    } else if (bar.parentElement !== host || bar !== host.firstElementChild) {
+      host.prepend(bar);
     }
 
     // In-flow only. Never overlay message rows.
@@ -786,6 +787,7 @@
       // Throttle bar updates only when the BMDs tab is already mounted.
       if (now - lastInjectAt < 250 && document.getElementById(EXT.BAR_ID) && isBmdsTabInCategoryBar()) {
         if (shouldShowBmdsBar()) {
+          placeFilterBar(findCategoryTablist());
           setActive(true);
           ensureBarVisible();
         }

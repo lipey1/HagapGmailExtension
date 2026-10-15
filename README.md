@@ -117,7 +117,7 @@ HagapGmailExtension/
     └── options.html|css|js
 ```
 
-Versão atual: ver `manifest.json` (ex.: `1.8.2`).
+Versão atual: ver `manifest.json` (ex.: `1.8.3`).
 
 ## Screenshots
 
